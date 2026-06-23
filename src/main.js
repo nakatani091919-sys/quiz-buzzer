@@ -342,7 +342,11 @@ document.getElementById('resetRoom').addEventListener('click', async () => {
     alert('部屋番号を入力してください');
     return;
   }
+ const ok = confirm('この部屋をリセットしますか？\n得点状態が初期化されます。');
 
+  if (!ok) {
+    return;
+  }
   await set(ref(db, `rooms/${roomId}`), {
     status: 'waiting',
     currentIndex: 0,
@@ -375,8 +379,11 @@ document.getElementById('correct').addEventListener('click', async () => {
     return;
   }
 
-  await addScore(roomId, answerer.playerId, 10);
+  const correctPoint = room.settings?.correctPoint ?? 10;
 
+  await addScore(roomId, answerer.playerId, correctPoint);
+
+  // 正解したら、その問題の受付を終了する
   await update(roomRef, {
     status: 'closed'
   });
