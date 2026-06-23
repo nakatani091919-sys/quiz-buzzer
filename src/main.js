@@ -35,6 +35,39 @@ if (!playerId) {
 
 let currentRoomId = '';
 let currentPlayerName = '';
+let audioContext = null;
+let hadAnswerRight = false;
+
+function initAudio() {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+  }
+
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+}
+
+function playAnswerRightSound() {
+  initAudio();
+
+  const oscillator = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+  oscillator.frequency.setValueAtTime(1320, audioContext.currentTime + 0.08);
+
+  gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.3, audioContext.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.25);
+
+  oscillator.connect(gain);
+  gain.connect(audioContext.destination);
+
+  oscillator.start();
+  oscillator.stop(audioContext.currentTime + 0.25);
+}
 
 document.querySelector('#app').innerHTML = `
   <main class="container">
@@ -204,6 +237,14 @@ function watchRoom(roomId) {
     } else {
       currentAnswerer.textContent = 'なし';
     }
+    const hasAnswerRight = answerer?.playerId === playerId;
+
+    if (hasAnswerRight && !hadAnswerRight) {
+      playAnswerRightSound();
+      playerMessage.textContent = 'あなたが回答者です！口頭で回答してください';
+    }
+
+    hadAnswerRight = hasAnswerRight;
 
     if (room.status === 'open') {
       buzzButton.disabled = false;
