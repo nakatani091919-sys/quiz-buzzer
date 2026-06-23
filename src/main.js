@@ -53,6 +53,15 @@ document.querySelector('#app').innerHTML = `
         <label>部屋番号</label>
         <input id="hostRoomId" placeholder="例: 1234" />
       </div>
+      <div class="row">
+        <label>正解時の点数</label>
+        <input id="correctPoint" type="number" value="10" />
+      </div>
+
+      <div class="row">
+        <label>不正解時の点数</label>
+        <input id="wrongPoint" type="number" value="-5" />
+      </div>
 
       <button id="createRoom">部屋作成</button>
       <button id="startQuestion">問題開始</button>
@@ -67,7 +76,8 @@ document.querySelector('#app').innerHTML = `
 
       <h3>早押し順</h3>
       <ol id="buzzList"></ol>
-
+      <h3>得点</h3>
+      <ul id="scoreList"></ul>
       <div class="judgeButtons">
         <button id="correct">正解</button>
         <button id="wrong">不正解・次の人へ</button>
@@ -95,6 +105,7 @@ document.querySelector('#app').innerHTML = `
       <button id="buzzButton" class="buzz" disabled>早押し！</button>
 
       <p id="playerMessage"></p>
+      <p id="myScore">現在の得点：0点</p>
     </section>
   </main>
 `;
@@ -109,6 +120,9 @@ const buzzList = document.getElementById('buzzList');
 const playerStatus = document.getElementById('playerStatus');
 const playerMessage = document.getElementById('playerMessage');
 const buzzButton = document.getElementById('buzzButton');
+
+const scoreList = document.getElementById('scoreList');
+const myScore = document.getElementById('myScore');
 
 document.getElementById('showHost').addEventListener('click', () => {
   hostArea.classList.remove('hidden');
@@ -139,16 +153,37 @@ function watchRoom(roomId) {
     hostStatus.textContent = statusText;
     playerStatus.textContent = statusText;
 
-    const buzzes = room.buzzes || {};
-    const sortedBuzzes = Object.entries(buzzes)
-      .map(([id, value]) => ({
-        playerId: id,
-        name: value.name,
-        timestamp: value.timestamp
-      }))
-      .filter((buzz) => typeof buzz.timestamp === 'number')
-      .sort((a, b) => a.timestamp - b.timestamp);
+    const players = room.players || {};
 
+    scoreList.innerHTML = '';
+
+  Object.entries(players)
+    .map(([id, player]) => ({
+      playerId: id,
+      name: player.name,
+      score: player.score ?? 0
+    }))
+    .sort((a, b) => b.score - a.score)
+    .forEach((player) => {
+      const li = document.createElement('li');
+      li.textContent = `${player.name}: ${player.score}点`;
+      scoreList.appendChild(li);
+    });
+
+  const me = players[playerId];
+  if (me) {
+    myScore.textContent = `現在の得点：${me.score ?? 0}点`;
+  }
+
+    const buzzes = room.buzzes || {};
+
+  const sortedBuzzes = Object.entries(buzzes)
+  .map(([id, value]) => ({
+    playerId: id,
+    name: value.name,
+    timestamp: value.timestamp ?? 0
+  }))
+  .sort((a, b) => a.timestamp - b.timestamp);
     buzzList.innerHTML = '';
 
     sortedBuzzes.forEach((buzz, index) => {
@@ -198,6 +233,48 @@ function convertStatus(status) {
       return '不明';
   }
 }
+function getSortedBuzzes(room) {
+  const buzzes = room.buzzes || {};
+
+  return Object.entries(buzzes)
+    .map(([id, value]) => ({
+      playerId: id,
+      name: value.name,
+      timestamp: value.timestamp ?? 0
+    }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+async function addScore(roomId, targetPlayerId, point) {
+  const playerRef = ref(db, `rooms/${roomId}/players/${targetPlayerId}`);
+  const snapshot = await get(playerRef);
+  const player = snapshot.val();
+
+  if (!player) {
+    alert('対象のプレイヤーが見つかりません');
+    return;
+  }
+
+  const currentScore = player.score ?? 0;
+
+  await update(playerRef, {
+    score: currentScore + point
+  });
+}
+
+function getCurrentAnswerer(room) {
+  const sortedBuzzes = getSortedBuzzes(room);
+  const currentIndex = room.currentIndex ?? 0;
+  return sortedBuzzes[currentIndex] || null;
+}
+function getPointSettingsFromInput() {
+  const correctPoint = Number(document.getElementById('correctPoint').value);
+  const wrongPoint = Number(document.getElementById('wrongPoint').value);
+
+  return {
+    correctPoint: Number.isFinite(correctPoint) ? correctPoint : 10,
+    wrongPoint: Number.isFinite(wrongPoint) ? wrongPoint : -5
+  };
+}
 
 // 出題者：部屋作成
 document.getElementById('createRoom').addEventListener('click', async () => {
@@ -210,11 +287,15 @@ document.getElementById('createRoom').addEventListener('click', async () => {
 
   currentRoomId = roomId;
 
-  await set(ref(db, `rooms/${roomId}`), {
-    status: 'waiting',
-    currentIndex: 0,
-    buzzes: {}
-  });
+  const pointSettings = getPointSettingsFromInput();
+
+await set(ref(db, `rooms/${roomId}`), {
+  status: 'waiting',
+  currentIndex: 0,
+  settings: pointSettings,
+  players: {},
+  buzzes: {}
+});
 
   watchRoom(roomId);
 });
@@ -230,7 +311,7 @@ document.getElementById('startQuestion').addEventListener('click', async () => {
 
   currentRoomId = roomId;
 
-  await set(ref(db, `rooms/${roomId}`), {
+   await update(ref(db, `rooms/${roomId}`), {
     status: 'open',
     currentIndex: 0,
     buzzes: {}
@@ -278,7 +359,25 @@ document.getElementById('correct').addEventListener('click', async () => {
     return;
   }
 
-  await update(ref(db, `rooms/${roomId}`), {
+  const roomRef = ref(db, `rooms/${roomId}`);
+  const snapshot = await get(roomRef);
+  const room = snapshot.val();
+
+  if (!room) {
+    alert('部屋が見つかりません');
+    return;
+  }
+
+  const answerer = getCurrentAnswerer(room);
+
+  if (!answerer) {
+    alert('現在の回答者がいません');
+    return;
+  }
+
+  await addScore(roomId, answerer.playerId, 10);
+
+  await update(roomRef, {
     status: 'closed'
   });
 });
@@ -296,7 +395,19 @@ document.getElementById('wrong').addEventListener('click', async () => {
   const snapshot = await get(roomRef);
   const room = snapshot.val();
 
-  if (!room) return;
+  if (!room) {
+    alert('部屋が見つかりません');
+    return;
+  }
+
+  const answerer = getCurrentAnswerer(room);
+
+  if (!answerer) {
+    alert('現在の回答者がいません');
+    return;
+  }
+
+  await addScore(roomId, answerer.playerId, -5);
 
   const currentIndex = room.currentIndex ?? 0;
 
