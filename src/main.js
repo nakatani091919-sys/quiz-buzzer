@@ -414,7 +414,8 @@ document.getElementById('wrong').addEventListener('click', async () => {
     return;
   }
 
-  await addScore(roomId, answerer.playerId, -5);
+  const wrongPoint = room.settings?.wrongPoint ?? -5;
+  await addScore(roomId, answerer.playerId, wrongPoint);
 
   const currentIndex = room.currentIndex ?? 0;
 
